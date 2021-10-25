@@ -1,8 +1,7 @@
-from ctypes import resize
+from importlib import reload
 import os
 import sys
 import random
-from time import time
 import cv2
 import pickle
 from numpy.lib.type_check import imag
@@ -23,8 +22,7 @@ from tensorflow.keras.optimizers import SGD, Adam
 
 valid_exts = ('.png', '.jpeg')
 current_dir = os.path.dirname(__file__)
-categories = ( 'A', 'B', 'C', 'D', 'E', 'F', )
-
+categories = ( 'H', 'J', 'G', )
 image_size = 50
 
 alpha_training_data_dir = os.path.join(current_dir, 'alphabets')
@@ -34,57 +32,87 @@ testing_data = []
 features_set = []
 labels_set = []
 test_feature_set = []
+trained_number_model_path = os.path.join(current_dir, 'number_reader.model')
 trained_aplhabet_features_model_path = os.path.join(current_dir, 'features_set.pickle')
 trained_aplhabet_label_model_path = os.path.join(current_dir, 'labels_set.pickle')
 trained_alphabet_model_path = os.path.join(current_dir, 'alphabet_reader.model')
+user_input_image_path = os.path.join(current_dir, 'input_test_data.png')
 
-class Predictor(QtWidgets.QDialog):
+class ImageCanvas(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        QtWidgets.QWidget.__init__(self, parent)
+        self.canvas = QtGui.QImage(300, 200, QImage.Format_RGB32)
+
+
+class Predictor(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
 
-        QtWidgets.QDialog.__init__(self, parent)
+        QtWidgets.QWidget.__init__(self, parent)
         self.setWindowTitle('Writer')
         self.setWindowFlags(self.windowFlags() ^ QtCore.Qt.WindowContextHelpButtonHint)
-
         self.main_layout = QtWidgets.QVBoxLayout()
-        input_horizontal_layout = QtWidgets.QHBoxLayout()
-        self.input_label = QtWidgets.QLabel('Input Image :')
-        input_horizontal_layout.addWidget(self.input_label)
-        self.input_line_edit = QtWidgets.QLineEdit()
-        self.input_line_edit.setReadOnly(True)
-        input_horizontal_layout.addWidget(self.input_line_edit)
-        self.file_browser = QtWidgets.QPushButton(' ... ',clicked=self.set_file_path)
-        input_horizontal_layout.addWidget(self.file_browser)
-        self.main_layout.addLayout(input_horizontal_layout)
-        
+        self.horizontal_layout = QtWidgets.QHBoxLayout()
+        self.input_canvas_layout = QtWidgets.QVBoxLayout()
+        self.canvas_widget = ImageCanvas()
+        self.canvas_widget.setFixedSize(300, 200)
+        self.canvas = self.canvas_widget.canvas
+        self.canvas.fill(QtCore.Qt.white)
+        self.painter_path = QtGui.QPainterPath()
+        self.input_canvas_layout.addWidget(self.canvas_widget)
+        self.horizontal_layout.addLayout(self.input_canvas_layout)
+        self.input_button_layout = QtWidgets.QVBoxLayout()
+        # self.canvas_eraser_button = QtWidgets.QPushButton('Eraser', clicked=self.eraser_clicked)
+        # self.input_button_layout.addWidget(self.canvas_eraser_button)
+        self.canvas_clearall_button = QtWidgets.QPushButton('Erase All', clicked=self.erase_all_clicked)
+        self.input_button_layout.addWidget(self.canvas_clearall_button)
+        self.horizontal_layout.addLayout(self.input_button_layout)
+
+        self.other_items_layout = QtWidgets.QVBoxLayout()
         self.predict_button = QtWidgets.QPushButton(' Predict ', clicked=self.predict_clicked)
-        self.main_layout.addWidget(self.predict_button)
+        self.other_items_layout.addWidget(self.predict_button)
         self.result_label = QtWidgets.QLabel(' Result ')
         self.result_label.setAlignment(Qt.AlignCenter)
-        self.main_layout.addWidget(self.result_label)
+        self.other_items_layout.addWidget(self.result_label)
         self.result_window = QtWidgets.QLabel()
         self.result_window.setAlignment(Qt.AlignCenter)
         self.result_window.setFont(QtGui.QFont('Times', weight=QtGui.QFont.Bold))
-        self.main_layout.addWidget(self.result_window)
-
+        self.other_items_layout.addWidget(self.result_window)
+        self.main_layout.addLayout(self.horizontal_layout)
+        self.main_layout.addLayout(self.other_items_layout)
         self.setLayout(self.main_layout)
+
         self.show()
 
+    def eraser_clicked(self):
+        print('Build a eraser for erasing selected data')
 
-    def set_file_path(self):
-     
-        browse_path = QtWidgets.QFileDialog.getOpenFileName(None, 'Select File')
-        old_path = self.input_line_edit.text()
-        self.input_line_edit.setText(str(browse_path[0]) if browse_path else old_path)
-        file_path, file_path_ext = os.path.splitext(self.input_line_edit.text())
-        if file_path_ext not in valid_exts:
-            print ('The selected file is not a valid Image. Please select png or jpeg')
-            self.input_line_edit.setText(old_path)
-        
+    def erase_all_clicked(self):
+        self.painter_path = QPainterPath()
+        self.canvas.fill(QtCore.Qt.white)
+        self.update()
+
+    def paintEvent(self, e):
+        painter = QtGui.QPainter(self)
+        painter.drawImage(e.rect(), self.canvas, self.rect())
+
+    def mousePressEvent(self, e):
+        self.painter_path.moveTo(e.pos())
+
+    def mouseMoveEvent(self, e):
+        self.painter_path.lineTo(e.pos())
+        painter = QtGui.QPainter(self.canvas)
+        pen = painter.pen()
+        pen.setWidth(4)
+        painter.setPen(pen)
+        painter.drawPath(self.painter_path)
+        painter.end()
+        self.update()
     
+
     @staticmethod
     def processing_user_input(input_data):
-
+        
         bad_input_image = []
         input_data = input_data
         print (input_data)
@@ -94,7 +122,7 @@ class Predictor(QtWidgets.QDialog):
             testing_data.append(resized_alphabet_data)
         except:
             bad_input_image.append(input_data)
-        
+
         if bad_input_image:
             print('Following test image data is bad and cant be read /n{}'.format(bad_input_image))
         
@@ -107,21 +135,31 @@ class Predictor(QtWidgets.QDialog):
 
     def predict_clicked(self):
         predictions = None
-        if self.input_line_edit.text() == '':
-            raise ValueError('Please provide a input image')
-
+        result = []      
         if not os.path.exists(trained_alphabet_model_path):
             Trainer.training_alphabet_model()
-        
+        # if not os.path.exists(trained_number_model_path):
+        #     Trainer.training_number_model()
         reload_alphabet_model_one = load_model(trained_alphabet_model_path)
-        
-        alpha_x_test = Predictor.processing_user_input(self.input_line_edit.text())
+        # reload_number_model = load_model(trained_number_model_path)
+        if os.path.exists(user_input_image_path):
+            os.remove(user_input_image_path)
+            self.canvas.save(user_input_image_path, 'PNG')
+            print('Resaving image at {}'.format(current_dir))
+        else:
+            print('Saving image at {}'.format(current_dir))
+            self.canvas.save(user_input_image_path, 'PNG')
 
-        predictions = reload_alphabet_model_one.predict([alpha_x_test])
+        input_image = user_input_image_path
+        alpha_x_test = Predictor.processing_user_input(input_image)
+        reload_alphabet_model_one
+        
+        predictions = reload_alphabet_model_one.predict_on_batch([alpha_x_test])
+        
         print('Result -----> ', categories[int(predictions)])
-        self.result_window.setText(categories[int(predictions[0])])
+        self.result_window.setText(categories[int(predictions)])
+ 
 
-        
 class Trainer():
     def __init__(self) -> None:
         pass
@@ -183,8 +221,7 @@ class Trainer():
         
 
         alpha_model.compile(optimizer=Adam(learning_rate=1e-6), loss='binary_crossentropy', metrics=['accuracy'])
-        alpha_model.fit(alpha_x_train, alpha_y_train, batch_size=10, epochs=10)
-        validation_loss, validation_accuracy = alpha_model.evaluate(alpha_x_train, alpha_y_train)
+        alpha_model.fit(alpha_x_train, alpha_y_train, epochs=20, validation_split=0.4)
 
         alpha_model.save(trained_alphabet_model_path)
 
@@ -204,6 +241,7 @@ class Trainer():
             num_model.fit(num_x_train, num_y_train, epochs= 3)
 
             num_model.save(trained_number_model_path)
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
